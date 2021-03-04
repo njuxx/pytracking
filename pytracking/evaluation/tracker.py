@@ -14,6 +14,7 @@ from ltr.data.bounding_box_utils import masks_to_bboxes
 from pytracking.evaluation.multi_object_wrapper import MultiObjectWrapper
 from pathlib import Path
 import torch
+from pytracking.utils.vot_utils.region import vot_overlap, vot_float2str
 
 
 _tracker_disp_colors = {1: (0, 255, 0), 2: (0, 0, 255), 3: (255, 0, 0),
@@ -577,7 +578,8 @@ class Tracker:
                 self.visualize(image, out['target_bbox'], segmentation)
 
 
-    def run_vot(self, debug=None, visdom_info=None):
+    # def run_vot(self, debug=None, visdom_info=None):
+    def run_vot(self, dataset, debug=None, visdom_info=None):
         params = self.get_parameters()
         params.tracker_name = self.name
         params.param_name = self.parameter_name
@@ -600,52 +602,121 @@ class Tracker:
         tracker = self.create_tracker(params)
         tracker.initialize_features()
 
-        import pytracking.evaluation.vot as vot
+        # import pytracking.evaluation.vot as vot
+        # import pytracking.VOT.vot as vot
 
-        def _convert_anno_to_list(vot_anno):
-            vot_anno = [vot_anno[0][0][0], vot_anno[0][0][1], vot_anno[0][1][0], vot_anno[0][1][1],
-                        vot_anno[0][2][0], vot_anno[0][2][1], vot_anno[0][3][0], vot_anno[0][3][1]]
-            return vot_anno
+        # def _convert_anno_to_list(vot_anno):
+        #     vot_anno = [vot_anno[0][0][0], vot_anno[0][0][1], vot_anno[0][1][0], vot_anno[0][1][1],
+        #                 vot_anno[0][2][0], vot_anno[0][2][1], vot_anno[0][3][0], vot_anno[0][3][1]]
+        #     return vot_anno
 
-        def _convert_image_path(image_path):
-            image_path_new = image_path[20:- 2]
-            return "".join(image_path_new)
+        # def _convert_image_path(image_path):
+        #     image_path_new = image_path[20:- 2]
+        #     return "".join(image_path_new)
 
-        """Run tracker on VOT."""
+        # """Run tracker on VOT."""
 
-        handle = vot.VOT("polygon")
+        # handle = vot.VOT("polygon")
 
-        vot_anno_polygon = handle.region()
-        vot_anno_polygon = _convert_anno_to_list(vot_anno_polygon)
+        # vot_anno_polygon = handle.region()
+        # vot_anno_polygon = _convert_anno_to_list(vot_anno_polygon)
 
-        init_state = convert_vot_anno_to_rect(vot_anno_polygon, tracker.params.vot_anno_conversion_type)
+        # init_state = convert_vot_anno_to_rect(vot_anno_polygon, tracker.params.vot_anno_conversion_type)
 
-        image_path = handle.frame()
-        if not image_path:
-            return
-        image_path = _convert_image_path(image_path)
+        # image_path = handle.frame()
+        # if not image_path:
+        #     return
+        # image_path = _convert_image_path(image_path)
 
-        image = self._read_image(image_path)
-        tracker.initialize(image, {'init_bbox': init_state})
+        # image = self._read_image(image_path)
+        # tracker.initialize(image, {'init_bbox': init_state})
 
-        # Track
-        while True:
-            image_path = handle.frame()
-            if not image_path:
-                break
-            image_path = _convert_image_path(image_path)
+        # # Track
+        # while True:
+        #     image_path = handle.frame()
+        #     if not image_path:
+        #         break
+        #     image_path = _convert_image_path(image_path)
 
-            image = self._read_image(image_path)
-            out = tracker.track(image)
-            state = out['target_bbox']
+        #     image = self._read_image(image_path)
+        #     out = tracker.track(image)
+        #     state = out['target_bbox']
 
-            handle.report(vot.Rectangle(state[0], state[1], state[2], state[3]))
+        #     handle.report(vot.Rectangle(state[0], state[1], state[2], state[3]))
 
-            segmentation = out['segmentation'] if 'segmentation' in out else None
-            if self.visdom is not None:
-                tracker.visdom_draw_tracking(image, out['target_bbox'], segmentation)
-            elif tracker.params.visualization:
-                self.visualize(image, out['target_bbox'], segmentation)
+        #     segmentation = out['segmentation'] if 'segmentation' in out else None
+        #     if self.visdom is not None:
+        #         tracker.visdom_draw_tracking(image, out['target_bbox'], segmentation)
+        #     elif tracker.params.visualization:
+        #         self.visualize(image, out['target_bbox'], segmentation)
+
+        total_lost = 0
+
+        for v_idx, seq in enumerate(dataset):
+            frame_counter = 0
+            lost_number = 0
+            toc = 0
+
+            seq_name = seq.name
+            seq_frames_path = seq.frames
+            seq_ground_truth_rect = seq.ground_truth_rect
+
+            pred_bboxes = []
+
+            for idx, img_path in enumerate(seq_frames_path):
+                img = cv.imread(img_path)
+                img = cv.cvtColor(img, cv.COLOR_BGR2RGB)
+                gt_bbox = seq_ground_truth_rect[idx]
+                if len(gt_bbox) == 4:
+                    gt_bbox = [gt_bbox[0], gt_bbox[1],
+                    gt_bbox[0], gt_bbox[1]+gt_bbox[3]-1,
+                    gt_bbox[0]+gt_bbox[2]-1, gt_bbox[1]+gt_bbox[3]-1,
+                    gt_bbox[0]+gt_bbox[2]-1, gt_bbox[1]]
+                tic = cv.getTickCount()
+                if idx == frame_counter:
+                    cx, cy, w, h = get_axis_aligned_bbox(np.array(gt_bbox))
+                    gt_bbox_ = [cx-(w-1)/2, cy-(h-1)/2, w, h]
+                    out = tracker.initialize(img, {'init_bbox': gt_bbox_})
+                    pred_bbox = gt_bbox_
+                    pred_bboxes.append(1)
+                elif idx > frame_counter:
+                    out = tracker.track(img)
+                    pred_bbox = out['target_bbox']
+                    overlap = vot_overlap(pred_bbox, gt_bbox, (img.shape[1], img.shape[0]))
+
+                    if overlap > 0:
+                    # not lost
+                        pred_bboxes.append(pred_bbox)
+                    else:
+                    # lost object
+                        pred_bboxes.append(2)
+                        frame_counter = idx + 5 # skip 5 frames
+                        lost_number += 1
+                else:
+                    pred_bboxes.append(0)
+                toc += cv.getTickCount() - tic
+                if idx == 0:
+                    cv.destroyAllWindows()
+            
+            toc /= cv.getTickFrequency()
+
+            # save results
+            video_path = os.path.join(self.results_dir,seq_name)
+            if not os.path.isdir(video_path):
+                os.makedirs(video_path)
+            result_path = os.path.join(video_path, '{}.txt'.format(seq_name))
+            with open(result_path, 'w') as f:
+                for x in pred_bboxes:
+                    if isinstance(x, int):
+                        f.write("{:d}\n".format(x))
+                    else:
+                        f.write(','.join([vot_float2str("%.4f", i) for i in x])+'\n')
+            print('({:3d}) Video: {:12s} Time: {:4.1f}s Speed: {:3.1f}fps Lost: {:d}'.format(
+                v_idx+1, seq_name, toc, idx / toc, lost_number))
+            total_lost += lost_number
+            print('total lost: {}'.format(total_lost))
+        print("{:s} total lost: {:d}".format(self.name, total_lost))          
+
 
     def get_parameters(self):
         """Get parameters."""
@@ -706,5 +777,29 @@ class Tracker:
         im = cv.imread(image_file)
         return cv.cvtColor(im, cv.COLOR_BGR2RGB)
 
-
+def get_axis_aligned_bbox(region):
+    """ convert region to (cx, cy, w, h) that represent by axis aligned box
+    """
+    nv = region.size
+    if nv == 8:
+        cx = np.mean(region[0::2])
+        cy = np.mean(region[1::2])
+        x1 = min(region[0::2])
+        x2 = max(region[0::2])
+        y1 = min(region[1::2])
+        y2 = max(region[1::2])
+        A1 = np.linalg.norm(region[0:2] - region[2:4]) * \
+            np.linalg.norm(region[2:4] - region[4:6])
+        A2 = (x2 - x1) * (y2 - y1)
+        s = np.sqrt(A1 / A2)
+        w = s * (x2 - x1) + 1
+        h = s * (y2 - y1) + 1
+    else:
+        x = region[0]
+        y = region[1]
+        w = region[2]
+        h = region[3]
+        cx = x+w/2
+        cy = y+h/2
+    return cx, cy, w, h
 

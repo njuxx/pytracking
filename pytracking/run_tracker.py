@@ -34,8 +34,11 @@ def run_tracker(tracker_name, tracker_param, run_id=None, dataset_name='otb', se
 
     trackers = [Tracker(tracker_name, tracker_param, run_id)]
 
-    run_dataset(dataset, trackers, debug, threads, visdom_info=visdom_info)
-
+    if dataset_name != 'vot':
+        run_dataset(dataset, trackers, debug, threads, visdom_info=visdom_info)
+    else:
+        for tracker_info in trackers:
+            tracker_info.run_vot(dataset, debug=debug, visdom_info=visdom_info)
 
 def main():
     parser = argparse.ArgumentParser(description='Run tracker on sequence or dataset.')

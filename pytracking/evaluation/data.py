@@ -2,6 +2,7 @@ import numpy as np
 from pytracking.evaluation.environment import env_settings
 from ltr.data.image_loader import imread_indexed
 from collections import OrderedDict
+from PIL import Image
 
 
 class BaseDataset:
@@ -33,6 +34,10 @@ class Sequence:
         self.multiobj_mode = multiobj_mode
         self.init_data = self._construct_init_data(init_data)
         self._ensure_start_frame()
+        # add
+        img = np.array(Image.open(frames[0]), np.uint8)
+        self.width = img.shape[1]
+        self.height = img.shape[0]
 
     def _ensure_start_frame(self):
         # Ensure start frame is 0
@@ -144,6 +149,9 @@ class Sequence:
 
     def __repr__(self):
         return "{self.__class__.__name__} {self.name}, length={len} frames".format(self=self, len=len(self.frames))
+
+    def select_tag(self, tag, start=0, end=0):
+        return ([1]*len(self.ground_truth_rect))[start:end]
 
 
 

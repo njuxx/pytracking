@@ -4,7 +4,7 @@ from ltr.dataset import Lasot, Got10k, TrackingNet
 from ltr.data import processing, sampler, LTRLoader
 import ltr.models.tracking.kysnet as kysnet_models
 import ltr.models.loss as ltr_losses
-from ltr import actors
+from ltr import actors, MultiGPU
 from ltr.trainers import LTRTrainer
 from ltr.models.kys.utils import DiMPScoreJittering
 import ltr.data.transforms as tfm
@@ -14,9 +14,10 @@ import ltr.admin.loading as network_loading
 def run(settings):
     settings.move_data_to_gpu = False
     settings.description = ''
-    settings.batch_size = 10
+    settings.batch_size = 10 # 10
     settings.test_sequence_length = 50
-    settings.num_workers = 8
+    settings.num_workers = 4
+    settings.multi_gpu = True
     settings.print_interval = 1
     settings.normalize_mean = [0.485, 0.456, 0.406]
     settings.normalize_std = [0.229, 0.224, 0.225]
@@ -34,9 +35,9 @@ def run(settings):
                             'Loss/raw/test_seq_acc',
                             'Loss/raw/dimp_seq_acc']
 
-    lasot_train = Lasot(settings.env.lasot_dir, split='train')
+    # lasot_train = Lasot(settings.env.lasot_dir, split='train')
     got10k_train = Got10k(settings.env.got10k_dir, split='vottrain')
-    trackingnet_train = TrackingNet(settings.env.trackingnet_dir, set_ids=[0, 1, 2, 3, 4])
+    # trackingnet_train = TrackingNet(settings.env.trackingnet_dir, set_ids=[0, 1, 2, 3, 4])
 
     # Validation datasets
     got10k_val = Got10k(settings.env.got10k_dir, split='votval')
@@ -83,8 +84,14 @@ def run(settings):
                             'max_train_gap': 30, 'allow_missing_target': True, 'min_fraction_valid_frames': 0.5,
                             'mode': 'Sequence'}
 
-    dataset_train = sampler.KYSSampler([got10k_train, trackingnet_train, lasot_train],
-                                       [0.3, 0.3, 0.25],
+    # dataset_train = sampler.KYSSampler([got10k_train, trackingnet_train, lasot_train],
+    #                                    [0.3, 0.3, 0.25],
+    #                                    samples_per_epoch=settings.batch_size * 150,
+    #                                    sequence_sample_info=sequence_sample_info,
+    #                                    processing=data_processing_train,
+    #                                    sample_occluded_sequences=True)
+    dataset_train = sampler.KYSSampler([got10k_train],
+                                       [1],
                                        samples_per_epoch=settings.batch_size * 150,
                                        sequence_sample_info=sequence_sample_info,
                                        processing=data_processing_train,
@@ -117,6 +124,9 @@ def run(settings):
     net.backbone_feature_extractor.load_state_dict(base_net.feature_extractor.state_dict())
     net.dimp_classifier.load_state_dict(base_net.classifier.state_dict())
     net.bb_regressor.load_state_dict(base_net.bb_regressor.state_dict())
+
+    if settings.multi_gpu:
+        net = MultiGPU(net, dim=1)
 
     # To be safe
     for p in net.backbone_feature_extractor.parameters():
